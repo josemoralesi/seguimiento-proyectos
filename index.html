@@ -346,7 +346,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
 <div id="toast">Guardado</div>
 
 <script>
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyPXa0xeEzBqMIAWHcIkrdkFmhsEW_8hUgHQuiheCQ9sdY0dU3x8ciKRvAaXqzZRXiQ/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwMkRGTQQS5R6TiNHBMDbsfQmObsj3gvk0mLG72E7jt15pFQcs4ogOEk3UfONKVWXIH/exec';
 const STORE_KEY = 'pn_seg_url';
 const RESPONSABLES = ['Jose Pastor','Indira Carmona','Enrique Torres','Franco Alarcón','Giancarlo Orrego','Paulo Torres','Jose Morales'];
 const INITIAL_DATA = 
@@ -3699,11 +3699,10 @@ async function load(){
       const r=await fetch(url,{method:'GET',redirect:'follow'});
       const d=await r.json();
       if(d.status==='ok'&&d.empresas&&d.empresas.length>0){
-        // Merge: use sheets data but restore full descriptions from INITIAL_DATA
-        const merged = mergeWithInitial(d.empresas);
-        DB=merged; setSS('ok','Sincronizado');
+        DB = d.empresas;
+        setSS('ok','Sincronizado');
       }
-      else { DB=JSON.parse(JSON.stringify(INITIAL_DATA)); setSS('ok','Datos iniciales'); await push(); }
+      else { DB=JSON.parse(JSON.stringify(INITIAL_DATA)); setSS('ok','Datos iniciales — guardando…'); await push(); }
     } catch(e){ DB=JSON.parse(JSON.stringify(INITIAL_DATA)); setSS('error','Sin conexión — local'); toast('Sin conexión con Google Sheets',true); }
     boot(); hideLoader();
   } catch(fatal){ console.error(fatal); hideLoader(); document.getElementById('content').innerHTML='<div style="padding:24px;color:var(--rose);background:var(--rose-lt);border-radius:12px;margin:16px"><b>Error: </b>'+fatal.message+'</div>'; }
@@ -4147,58 +4146,56 @@ document.getElementById('search').addEventListener('input',()=>renderSidebar());
 // Cuando los datos vienen de Sheets, restaura descripciones desde
 // INITIAL_DATA para garantizar textos completos siempre
 function restoreTexts(){
-  if(!confirm('¿Restaurar todos los textos completos desde los datos originales del Excel? Los cambios de avance, fechas y observaciones se conservan.')) return;
-  DB.forEach(emp => {
-    const initEmp = INITIAL_DATA.find(e => e.id === emp.id);
-    if (!initEmp) return;
-    emp.proyectos.forEach(p => {
-      const initP = initEmp.proyectos.find(pp => pp.id === p.id);
-      if (!initP) return;
-      if (initP.nombre) p.nombre = initP.nombre;
-      p.servicios.forEach(s => {
-        const initS = initP.servicios.find(ss => ss.id === s.id);
-        if (!initS) return;
-        if (initS.nombre) s.nombre = initS.nombre;
-        s.actividades.forEach(a => {
-          const initA = initS.actividades.find(aa => aa.id === a.id);
-          if (initA && initA.desc) a.desc = initA.desc;
-        });
-      });
-    });
-  });
+  if(!confirm('¿Restaurar todos los textos completos desde los datos originales del Excel? Los cambios de avance, fechas, responsable, estado y observaciones se conservan.')) return;
+  const current = JSON.parse(JSON.stringify(DB));
+  DB = applySheetData(current);
   renderContent();
-  toast('✓ Textos restaurados — guarda para sincronizar');
+  toast('✓ Textos restaurados — presiona Guardar Todo para sincronizar');
 }
 
-function mergeWithInitial(sheetsEmpresas) {
-  const result = JSON.parse(JSON.stringify(sheetsEmpresas));
+// applySheetData: parte SIEMPRE de INITIAL_DATA (textos completos del Excel)
+// y solo aplica los datos editables que vienen del Sheet (avance, fechas, responsable, estado, obs, mesesCheck)
+function applySheetData(sheetsEmpresas) {
+  // Clonar INITIAL_DATA como base — textos siempre completos
+  const result = JSON.parse(JSON.stringify(INITIAL_DATA));
   result.forEach(emp => {
-    const initEmp = INITIAL_DATA.find(e => e.id === emp.id);
-    if (!initEmp) return;
+    const sEmp = sheetsEmpresas.find(e => e.id === emp.id);
+    if (!sEmp) return;
+    // Tomar onedrive del Sheet
+    if (sEmp.onedrive) emp.onedrive = sEmp.onedrive;
     emp.proyectos.forEach(p => {
-      const initP = initEmp.proyectos.find(pp => pp.id === p.id);
-      if (!initP) return;
-      // Restore project name from initial if it seems truncated
-      if (initP.nombre && initP.nombre.length > p.nombre.length) {
-        p.nombre = initP.nombre;
-      }
+      const sP = sEmp.proyectos ? sEmp.proyectos.find(pp => pp.id === p.id) : null;
+      if (!sP) return;
       p.servicios.forEach(s => {
-        const initS = initP.servicios.find(ss => ss.id === s.id);
-        if (!initS) return;
-        // Restore service name
-        if (initS.nombre && initS.nombre.length > s.nombre.length) {
-          s.nombre = initS.nombre;
-        }
+        const sS = sP.servicios ? sP.servicios.find(ss => ss.id === s.id) : null;
+        if (!sS) return;
+        // Tomar avance del Sheet
+        if (sS.avance !== undefined) s.avance = sS.avance;
         s.actividades.forEach(a => {
-          const initA = initS.actividades.find(aa => aa.id === a.id);
-          if (!initA) return;
-          // Always restore description from INITIAL_DATA (source of truth)
-          if (initA.desc && initA.desc.length > a.desc.length) {
-            a.desc = initA.desc;
-          }
+          const sA = sS.actividades ? sS.actividades.find(aa => aa.id === a.id) : null;
+          if (!sA) return;
+          // Solo tomar campos editables del Sheet — NUNCA desc ni nombre
+          if (sA.responsable !== undefined) a.responsable = sA.responsable;
+          if (sA.fechaInicio !== undefined) a.fechaInicio = sA.fechaInicio;
+          if (sA.fechaFin !== undefined) a.fechaFin = sA.fechaFin;
+          if (sA.tipo !== undefined) a.tipo = sA.tipo;
+          if (sA.meses !== undefined) a.meses = sA.meses;
+          if (sA.mesesCheck !== undefined) a.mesesCheck = sA.mesesCheck;
+          if (sA.estado !== undefined) a.estado = sA.estado;
+          if (sA.obs !== undefined) a.obs = sA.obs;
         });
       });
     });
+    // También incluir proyectos/servicios/actividades nuevos creados en la app
+    sEmp.proyectos && sEmp.proyectos.forEach(sP => {
+      if (!emp.proyectos.find(p => p.id === sP.id)) {
+        emp.proyectos.push(sP);
+      }
+    });
+  });
+  // Incluir empresas nuevas creadas en la app
+  sheetsEmpresas.forEach(sEmp => {
+    if (!result.find(e => e.id === sEmp.id)) result.push(sEmp);
   });
   return result;
 }
